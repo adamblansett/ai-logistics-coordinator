@@ -1,6 +1,7 @@
 from functools import lru_cache
 from typing import Literal
 
+from fastapi import Request
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _DEFAULT_DEV_SECRET = "dev-insecure-secret-change-in-production-32bytes"
@@ -24,16 +25,32 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:5173,http://localhost:3000"
 
     database_url: str = "sqlite+aiosqlite:///./ai_logistics_coordinator.db"
+    redis_url: str = "redis://redis:6379/0"
 
     llm_default_provider: Literal["mock", "ollama", "gemini"] = "mock"
     llm_fallback_providers: str = "ollama,gemini,mock"
+    ollama_base_url: str = "http://localhost:11434"
+    ollama_default_model: str = "llama-3.1-8b-instruct"
+    gemini_api_key: str = ""
+    gemini_default_model: str = "gemini-2.5-flash"
+    llm_timeout_seconds: float = 15.0
     llm_redact_pii_for_cloud: bool = True
 
     auth_secret_key: str = _DEFAULT_DEV_SECRET
+    webhook_signing_secret: str = ""
+    seed_demo_data: bool = False
 
     @property
     def cors_origin_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+
+    @property
+    def llm_fallback_list(self) -> list[str]:
+        return [
+            provider.strip().lower()
+            for provider in self.llm_fallback_providers.split(",")
+            if provider.strip()
+        ]
 
 
 @lru_cache(maxsize=1)
@@ -45,6 +62,14 @@ def get_settings() -> Settings:
 def clear_settings_cache() -> None:
     """Clear cached settings for deterministic test overrides."""
     get_settings.cache_clear()
+
+
+def get_runtime_settings(request: Request) -> Settings:
+    """Return app-scoped settings when attached to FastAPI state, else cached defaults."""
+    app_settings = getattr(request.app.state, "settings", None)
+    if isinstance(app_settings, Settings):
+        return app_settings
+    return get_settings()
 
 
 def validate_production_security(settings: Settings) -> None:
