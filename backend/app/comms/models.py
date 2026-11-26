@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, new_uuid, utcnow
@@ -33,6 +33,8 @@ class CarrierCommunication(Base):
     reviewed_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
     review_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     external_message_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    delivery_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    delivery_receipt_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utcnow
     )

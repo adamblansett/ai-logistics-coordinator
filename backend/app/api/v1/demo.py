@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.auth import Principal, require_roles
 from app.core.seed import seed_demo_workspace
 from app.db.session import get_db
 from app.llm.router import LLMRouter, get_llm_router
@@ -19,6 +20,7 @@ class DemoSeedResponse(BaseModel):
 
 @router.post("/seed", response_model=DemoSeedResponse)
 async def seed_demo_endpoint(
+    _: Principal = Depends(require_roles("DISPATCHER")),
     session: AsyncSession = Depends(get_db),
     llm_router: LLMRouter = Depends(get_llm_router),
 ) -> DemoSeedResponse:

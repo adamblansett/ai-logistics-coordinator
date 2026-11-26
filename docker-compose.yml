@@ -43,6 +43,7 @@ services:
       LLM_DEFAULT_PROVIDER: ${LLM_DEFAULT_PROVIDER:-mock}
       AUTH_SECRET_KEY: ${AUTH_SECRET_KEY:-dev-insecure-secret-change-in-production-32bytes}
       SEED_DEMO_DATA: ${SEED_DEMO_DATA:-true}
+      TASK_EXECUTION_MODE: ${TASK_EXECUTION_MODE:-inline}
     ports:
       - "8000:8000"
     depends_on:
@@ -55,6 +56,25 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: ai-logistics-coordinator-worker
+    command: ["celery", "-A", "app.workers.celery_app:celery_app", "worker", "--loglevel=info"]
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-app}@postgres:5432/${POSTGRES_DB:-ai_logistics_coordinator}
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      AUTH_SECRET_KEY: ${AUTH_SECRET_KEY:-dev-insecure-secret-change-in-production-32bytes}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
   frontend:
     build:

@@ -17,6 +17,9 @@ class HealthResponse(BaseModel):
     environment: str
     llm_provider: str
     database: str = "ok"
+    auth_enabled: bool = False
+    rate_limit_enabled: bool = True
+    otel_enabled: bool = False
 
 
 @router.get("", response_model=HealthResponse)
@@ -31,6 +34,9 @@ async def health_check(settings: Settings = Depends(get_runtime_settings)) -> He
         environment=settings.app_env,
         llm_provider=settings.llm_default_provider,
         database="ok",
+        auth_enabled=settings.auth_enabled,
+        rate_limit_enabled=settings.rate_limit_enabled,
+        otel_enabled=settings.otel_enabled,
     )
 
 
@@ -59,4 +65,7 @@ async def readiness_check(
         environment=settings.app_env,
         llm_provider=settings.llm_default_provider,
         database="ok",
+        auth_enabled=settings.auth_enabled,
+        rate_limit_enabled=settings.rate_limit_enabled,
+        otel_enabled=settings.otel_enabled,
     )

@@ -7,10 +7,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.comms.schemas import CommDraftRequest
 from app.comms.service import draft_communication
 from app.core.audit import record_audit_event
-from app.db.base import utcnow
+from app.core.auth import hash_password
+from app.core.models import UserAccount
+from app.db.base import new_uuid, utcnow
 from app.inventory.schemas import ExpectedLineItem, ReceivedLineItem, ReconciliationCreate
 from app.inventory.service import run_reconciliation
 from app.llm.router import LLMRouter
+from app.memory.service import index_memory
 from app.routing.schemas import CarrierLaneCreate, DisruptionAlertCreate, RouteOptimizeRequest
 from app.routing.service import create_disruption, create_lane, optimize_route
 from app.tracking.models import Shipment
@@ -351,6 +354,67 @@ async def seed_demo_workspace(
         ),
     )
 
+    # 4b. Seed Operational Memories (pgvector-ready historical playbooks)
+    await index_memory(
+        session,
+        category="ROUTE_PLAYBOOK",
+        corridor="Los Angeles, CA -> Chicago, IL",
+        carrier_scac="BNSF",
+        title="Winter Storm I-80 Reefer Intermodal Fallback",
+        content=(
+            "During Midwest lake-effect snow advisories, BNSF Cold Intermodal "
+            "outperforms over-the-road FTL on schedule adherence while protecting cold chain."
+        ),
+        actor="demo-seed",
+    )
+    await index_memory(
+        session,
+        category="TRACKING_EXCEPTION",
+        corridor="Savannah, GA -> Atlanta, GA",
+        carrier_scac="SEFL",
+        title="Garden City Port Congestion Drayage Waiver",
+        content=(
+            "Request pre-gate chassis pool allocation and document berth dwell timestamps "
+            "before approving accessorial detention charges."
+        ),
+        actor="demo-seed",
+    )
+    await index_memory(
+        session,
+        category="OSD_CLAIM",
+        corridor="Savannah, GA -> Atlanta, GA",
+        carrier_scac="SEFL",
+        title="Hydraulic Valve OS&D Shortage Claim Playbook",
+        content=(
+            "Attach signed dock receiving tally, SKU-IND-880 inspection photos, and BOL "
+            "seal number within 48 hours of unload."
+        ),
+        actor="demo-seed",
+    )
+
+    # 4c. Seed default dev user accounts when non-production users table is empty
+    if llm_router.settings.app_env.strip().lower() != "production":
+        existing_user = (
+            await session.execute(select(UserAccount.id).limit(1))
+        ).scalar_one_or_none()
+        if existing_user is None:
+            for uname, role, pw in (
+                ("admin", "ADMIN", "admin123!"),
+                ("dispatcher", "DISPATCHER", "dispatch123!"),
+                ("warehouse", "WAREHOUSE", "warehouse123!"),
+            ):
+                session.add(
+                    UserAccount(
+                        id=new_uuid(),
+                        username=uname,
+                        role=role,
+                        password_hash=hash_password(pw),
+                        active=True,
+                        created_at=utcnow(),
+                    )
+                )
+            await session.commit()
+
     # 5. Pending Route Recommendation
     await optimize_route(
         session,
@@ -469,6 +533,7 @@ async def seed_demo_workspace(
             "shipments": 5,
             "carrier_lanes": 6,
             "disruptions": 2,
+            "operational_memories": 3,
             "route_recommendations": 1,
             "carrier_communications": 2,
             "inventory_reconciliations": 2,

@@ -54,6 +54,63 @@ function createWorkspaceFetchMock(overrides?: {
         environment: 'test',
         llm_provider: 'mock',
         database: 'ok',
+        auth_enabled: false,
+      });
+    }
+
+    if (url === '/api/v1/auth/me') {
+      return jsonResponse({
+        username: 'dev-admin',
+        role: 'ADMIN',
+        auth_method: 'dev_anonymous',
+        authenticated: false,
+        auth_enabled: false,
+      });
+    }
+
+    if (url === '/api/v1/auth/login' && method === 'POST') {
+      return jsonResponse({
+        access_token: 'mock-jwt-token',
+        token_type: 'bearer',
+        expires_in: 28800,
+        username: 'dispatcher',
+        role: 'DISPATCHER',
+      });
+    }
+
+    if (url.startsWith('/api/v1/memory/search')) {
+      return jsonResponse([
+        {
+          memory: {
+            id: 'mem-1',
+            category: 'ROUTE_PLAYBOOK',
+            entity_id: null,
+            corridor: 'Los Angeles, CA -> Chicago, IL',
+            carrier_scac: 'BNSF',
+            title: 'Winter Storm I-80 Reefer Intermodal Fallback',
+            content: 'Use BNSF Cold Intermodal during lake-effect snow advisories.',
+            metadata: {},
+            created_at: '2026-11-26T10:00:00Z',
+          },
+          score: 0.91,
+        },
+      ]);
+    }
+
+    if (url.startsWith('/api/v1/memory')) {
+      return jsonResponse([]);
+    }
+
+    if (url === '/api/v1/workers/sla-sweep' && method === 'POST') {
+      return jsonResponse({
+        execution_mode: 'inline',
+        queued: false,
+        task_id: null,
+        summary: {
+          checked_shipments: 5,
+          breached_shipments: 2,
+          exceptions_opened_or_updated: 1,
+        },
       });
     }
 
@@ -411,5 +468,27 @@ describe('AI Logistics Coordinator Control Tower UI', () => {
     expect(
       await screen.findByText(/Hash Chain Verified: all 18 entries intact/i)
     ).toBeInTheDocument();
+
+    // Memory & Ops tab + Semantic Search + SLA Sweep
+    await user.click(within(nav).getByRole('button', { name: /Memory & Ops/i }));
+    const searchInput = await screen.findByPlaceholderText(/Search historical resolutions/i);
+    await user.type(searchInput, 'winter storm BNSF');
+    await user.click(screen.getByRole('button', { name: /Semantic Search/i }));
+    expect(
+      await screen.findByText(/Winter Storm I-80 Reefer Intermodal Fallback/i)
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /Run SLA Breach Sweep/i }));
+    expect(await screen.findByText(/Breached 2/i)).toBeInTheDocument();
+
+    // Sign-In modal submits /api/v1/auth/login
+    await user.click(screen.getByRole('button', { name: /Sign In/i }));
+    await user.click(screen.getByRole('button', { name: /Authenticate/i }));
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/v1/auth/login',
+        expect.objectContaining({ method: 'POST' })
+      );
+    });
   });
 });

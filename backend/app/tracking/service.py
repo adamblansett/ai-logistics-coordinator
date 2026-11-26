@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import record_audit_event
 from app.db.base import ensure_utc, new_uuid, utcnow
+from app.memory.service import index_memory
 from app.tracking.models import Shipment, TrackingEvent, TrackingException
 from app.tracking.normalizer import NormalizedEvent
 from app.tracking.schemas import (
@@ -27,7 +28,12 @@ _REASON_TO_EXCEPTION_TYPE: dict[str, str] = {
 }
 
 
-async def create_shipment(session: AsyncSession, payload: ShipmentCreate) -> Shipment:
+async def create_shipment(
+    session: AsyncSession,
+    payload: ShipmentCreate,
+    *,
+    actor_override: str | None = None,
+) -> Shipment:
     """Create and persist a tracked shipment with audit trail entry."""
     existing = await session.execute(
         select(Shipment).where(Shipment.reference_number == payload.reference_number.strip())
@@ -71,7 +77,7 @@ async def create_shipment(session: AsyncSession, payload: ShipmentCreate) -> Shi
         entity_type="shipment",
         entity_id=shipment.id,
         action="CREATED",
-        actor=payload.actor,
+        actor=actor_override or payload.actor,
         previous_state=None,
         new_state=shipment.status,
         details={
@@ -414,6 +420,32 @@ async def update_exception_status(
         new_state=new_status,
         details={"shipment_id": exc.shipment_id, "resolution_notes": exc.resolution_notes},
     )
+
+    if new_status == "RESOLVED":
+        ship_res = await session.execute(select(Shipment).where(Shipment.id == exc.shipment_id))
+        shipment = ship_res.scalar_one_or_none()
+        corridor = f"{shipment.origin} -> {shipment.destination}" if shipment else None
+        carrier_scac = shipment.carrier_scac if shipment else None
+        ref = shipment.reference_number if shipment else exc.shipment_id
+        await index_memory(
+            session,
+            category="TRACKING_EXCEPTION",
+            entity_id=exc.id,
+            corridor=corridor,
+            carrier_scac=carrier_scac,
+            title=f"Resolved {exc.exception_type} for {ref}",
+            content=(
+                f"{exc.summary} Resolution: {exc.resolution_notes or 'Closed by dispatcher.'}"
+            ),
+            metadata={
+                "shipment_id": exc.shipment_id,
+                "severity": exc.severity,
+                "delay_minutes": exc.delay_minutes,
+            },
+            actor=actor,
+            commit=False,
+        )
+
     await session.commit()
     await session.refresh(exc)
     return exc

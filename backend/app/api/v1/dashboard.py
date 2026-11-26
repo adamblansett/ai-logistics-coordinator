@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.audit import AuditLogRead
 from app.comms.models import CarrierCommunication
+from app.core.auth import Principal, get_current_principal
 from app.core.models import AuditLog
 from app.db.session import get_db
 from app.inventory.models import InventoryAlert
@@ -31,6 +32,7 @@ class DashboardSummaryResponse(BaseModel):
 
 @router.get("/summary", response_model=DashboardSummaryResponse)
 async def get_dashboard_summary(
+    _: Principal = Depends(get_current_principal),
     session: AsyncSession = Depends(get_db),
 ) -> DashboardSummaryResponse:
     """Aggregate live operational KPIs across tracking, routing, comms, inventory, and audit."""

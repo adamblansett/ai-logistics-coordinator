@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import verify_audit_chain
+from app.core.auth import Principal, get_current_principal
 from app.core.models import AuditLog
 from app.db.session import get_db
 
@@ -58,6 +59,7 @@ async def list_audit_logs_endpoint(
     entity_id: str | None = Query(default=None),
     action: str | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=500),
+    _: Principal = Depends(get_current_principal),
     session: AsyncSession = Depends(get_db),
 ) -> list[AuditLogRead]:
     stmt = select(AuditLog).order_by(AuditLog.sequence_number.desc()).limit(limit)
@@ -74,6 +76,7 @@ async def list_audit_logs_endpoint(
 
 @router.get("/verify", response_model=AuditVerifyResponse)
 async def verify_audit_chain_endpoint(
+    _: Principal = Depends(get_current_principal),
     session: AsyncSession = Depends(get_db),
 ) -> AuditVerifyResponse:
     valid, count, first_broken_id = await verify_audit_chain(session)

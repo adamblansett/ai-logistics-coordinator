@@ -314,8 +314,15 @@ export function CommsPanel({
                     {comm.external_message_id && (
                       <span className="rounded bg-emerald-50 px-2 py-0.5 font-mono text-emerald-800">
                         Sent ID: {comm.external_message_id}
+                        {comm.delivery_attempts ? ` (${comm.delivery_attempts} attempt)` : ''}
                       </span>
                     )}
+                    {Array.isArray(comm.grounding_facts.historical_context) &&
+                      comm.grounding_facts.historical_context.length > 0 && (
+                        <span className="rounded bg-purple-50 px-2 py-0.5 text-purple-800">
+                          Memories: {comm.grounding_facts.historical_context.length}
+                        </span>
+                      )}
                   </div>
 
                   <div className="mt-3 flex flex-wrap items-center gap-2">

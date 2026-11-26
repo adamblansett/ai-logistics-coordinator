@@ -4,6 +4,7 @@ export type TabKey =
   | 'routing'
   | 'comms'
   | 'inventory'
+  | 'memory'
   | 'audit';
 
 export interface HealthStatus {
@@ -14,6 +15,49 @@ export interface HealthStatus {
   environment: string;
   llm_provider: string;
   database?: string;
+  auth_enabled?: boolean;
+  rate_limit_enabled?: boolean;
+  otel_enabled?: boolean;
+}
+
+export interface AuthPrincipal {
+  username: string;
+  role: string;
+  auth_method: string;
+  authenticated: boolean;
+  auth_enabled: boolean;
+}
+
+export interface AuthTokenResponse {
+  access_token: string;
+  token_type: string;
+  expires_in: number;
+  username: string;
+  role: string;
+}
+
+export interface OperationalMemory {
+  id: string;
+  category: string;
+  entity_id: string | null;
+  corridor: string | null;
+  carrier_scac: string | null;
+  title: string;
+  content: string;
+  metadata: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface MemorySearchHit {
+  memory: OperationalMemory;
+  score: number;
+}
+
+export interface WorkerDispatchResponse {
+  execution_mode: string;
+  queued: boolean;
+  task_id: string | null;
+  summary: Record<string, unknown>;
 }
 
 export interface AuditLogEntry {
@@ -199,6 +243,8 @@ export interface CarrierCommunication {
   reviewed_by: string | null;
   review_notes: string | null;
   external_message_id: string | null;
+  delivery_attempts?: number;
+  delivery_receipt?: Record<string, unknown>;
   created_at: string;
   reviewed_at: string | null;
   sent_at: string | null;

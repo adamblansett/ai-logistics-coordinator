@@ -12,10 +12,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && groupadd --gid 10001 appgroup \
     && useradd --uid 10001 --gid appgroup --shell /usr/sbin/nologin --create-home appuser
 
-COPY pyproject.toml alembic.ini ./
+COPY pyproject.toml alembic.ini entrypoint.sh ./
 COPY alembic ./alembic
 COPY app ./app
 RUN pip install --no-cache-dir . \
+    && chmod +x /app/entrypoint.sh \
     && mkdir -p /data/storage \
     && chown -R appuser:appgroup /app /data/storage
 
@@ -26,4 +27,4 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
     CMD curl -fsS http://127.0.0.1:8000/api/v1/health/live || exit 1
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["/app/entrypoint.sh"]

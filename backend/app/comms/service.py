@@ -1,17 +1,21 @@
 import json
+from dataclasses import asdict
 from typing import Any
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.comms.delivery import deliver_communication
 from app.comms.models import CarrierCommunication
 from app.comms.schemas import CommDraftRequest
 from app.core.audit import record_audit_event
+from app.core.config import Settings
 from app.db.base import ensure_utc, new_uuid, utcnow
 from app.inventory.models import InventoryAlert
 from app.llm.base import LLMRequest
 from app.llm.router import LLMRouter
+from app.memory.service import search_memories
 from app.tracking.models import Shipment, TrackingEvent, TrackingException
 
 
@@ -34,6 +38,8 @@ async def draft_communication(
     session: AsyncSession,
     llm_router: LLMRouter,
     req: CommDraftRequest,
+    *,
+    actor_override: str | None = None,
 ) -> CarrierCommunication:
     """Generate a grounded carrier communication draft in PENDING_APPROVAL state."""
     ship_res = await session.execute(select(Shipment).where(Shipment.id == req.shipment_id))
@@ -68,6 +74,12 @@ async def draft_communication(
     )
     open_alerts = list(alert_res.scalars().all())
 
+    memory_hits = await search_memories(
+        session,
+        f"{shipment.carrier_name} {shipment.origin} {shipment.destination} {req.comm_type}",
+        limit=2,
+    )
+
     grounding_facts: dict[str, Any] = {
         "comm_type": req.comm_type,
         "channel": req.channel,
@@ -95,6 +107,9 @@ async def draft_communication(
         "open_inventory_alerts": [
             f"{al.sku} {al.alert_type} ({al.variance_qty} units, ${al.financial_impact_usd:,.2f})"
             for al in open_alerts
+        ],
+        "historical_context": [
+            f"{hit.memory.title}: {hit.memory.content}" for hit in memory_hits
         ],
         "custom_notes": req.custom_notes.strip(),
     }
@@ -138,7 +153,7 @@ async def draft_communication(
         pii_redacted=llm_response.pii_redacted,
         redacted_categories_json=json.dumps(llm_response.redacted_categories),
         status="PENDING_APPROVAL",
-        created_by=req.actor,
+        created_by=actor_override or req.actor,
         created_at=utcnow(),
     )
     session.add(comm)
@@ -149,7 +164,7 @@ async def draft_communication(
         entity_type="carrier_comm",
         entity_id=comm.id,
         action="DRAFT_CREATED",
-        actor=req.actor,
+        actor=actor_override or req.actor,
         previous_state=None,
         new_state="PENDING_APPROVAL",
         details={
@@ -276,6 +291,7 @@ async def send_communication(
     comm_id: str,
     *,
     actor: str,
+    settings: Settings | None = None,
 ) -> CarrierCommunication:
     """Dispatch an APPROVED communication; strictly rejects any unapproved state."""
     comm = await get_communication_or_404(session, comm_id)
@@ -288,9 +304,20 @@ async def send_communication(
             ),
         )
 
+    effective_settings = settings or Settings()
+    try:
+        receipt = await deliver_communication(comm, effective_settings)
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=str(exc),
+        ) from exc
+
     comm.status = "SENT"
     comm.sent_at = utcnow()
-    comm.external_message_id = f"MSG-{comm.id[:8].upper()}"
+    comm.external_message_id = receipt.external_message_id
+    comm.delivery_attempts = receipt.attempts
+    comm.delivery_receipt_json = json.dumps(asdict(receipt))
     await session.flush()
 
     await record_audit_event(
@@ -305,6 +332,8 @@ async def send_communication(
             "channel": comm.channel,
             "recipient_contact": comm.recipient_contact,
             "external_message_id": comm.external_message_id,
+            "delivery_mode": receipt.delivery_mode,
+            "delivery_attempts": receipt.attempts,
         },
     )
     await session.commit()

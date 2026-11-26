@@ -59,6 +59,8 @@ class CarrierCommunicationRead(BaseModel):
     reviewed_by: str | None
     review_notes: str | None
     external_message_id: str | None
+    delivery_attempts: int = 0
+    delivery_receipt: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
     reviewed_at: datetime | None
     sent_at: datetime | None
@@ -84,6 +86,8 @@ class CarrierCommunicationRead(BaseModel):
             reviewed_by=model.reviewed_by,
             review_notes=model.review_notes,
             external_message_id=model.external_message_id,
+            delivery_attempts=int(getattr(model, "delivery_attempts", 0) or 0),
+            delivery_receipt=json.loads(getattr(model, "delivery_receipt_json", "{}") or "{}"),
             created_at=model.created_at,
             reviewed_at=model.reviewed_at,
             sent_at=model.sent_at,

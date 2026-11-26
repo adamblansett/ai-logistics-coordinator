@@ -24,6 +24,8 @@ async def run_reconciliation(
     session: AsyncSession,
     llm_router: LLMRouter,
     req: ReconciliationCreate,
+    *,
+    actor_override: str | None = None,
 ) -> InventoryReconciliation:
     """Reconcile expected ASN/BOL quantities with received counts and persist alerts."""
     if req.shipment_id:
@@ -63,6 +65,7 @@ async def run_reconciliation(
         )
     )
 
+    effective_actor = actor_override or req.actor
     rec_status = "MATCHED" if not result.issues else "DISCREPANCY_OPEN"
     now = utcnow()
     rec = InventoryReconciliation(
@@ -81,7 +84,7 @@ async def run_reconciliation(
         discrepancies_json=json.dumps(issue_dicts),
         ai_summary=llm_response.content,
         llm_provider=llm_response.provider,
-        reconciled_by=req.actor,
+        reconciled_by=effective_actor,
         created_at=now,
     )
     session.add(rec)
@@ -112,7 +115,7 @@ async def run_reconciliation(
         entity_type="inventory_reconciliation",
         entity_id=rec.id,
         action="RECONCILED",
-        actor=req.actor,
+        actor=effective_actor,
         previous_state=None,
         new_state=rec_status,
         details={

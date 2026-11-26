@@ -1,6 +1,8 @@
 import type {
   AuditLogEntry,
   AuditVerifyResult,
+  AuthPrincipal,
+  AuthTokenResponse,
   CarrierCommunication,
   CarrierLane,
   DashboardSummary,
@@ -9,19 +11,55 @@ import type {
   HealthStatus,
   InventoryAlert,
   InventoryReconciliation,
+  MemorySearchHit,
+  OperationalMemory,
   RouteRecommendation,
   Shipment,
   ShipmentDetail,
   TrackingException,
+  WorkerDispatchResponse,
 } from '../types/logistics';
 
+const TOKEN_STORAGE_KEY = 'ai_logistics_jwt';
+let memoryToken: string | null = null;
+
+export function getAuthToken(): string | null {
+  if (memoryToken) return memoryToken;
+  try {
+    return typeof window !== 'undefined' ? window.sessionStorage.getItem(TOKEN_STORAGE_KEY) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function setAuthToken(token: string | null): void {
+  memoryToken = token;
+  try {
+    if (typeof window !== 'undefined') {
+      if (token) {
+        window.sessionStorage.setItem(TOKEN_STORAGE_KEY, token);
+      } else {
+        window.sessionStorage.removeItem(TOKEN_STORAGE_KEY);
+      }
+    }
+  } catch {
+    // Ignore storage quota or sandbox errors
+  }
+}
+
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
+  const token = getAuthToken();
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...((init?.headers as Record<string, string> | undefined) ?? {}),
+  };
+  if (token && !headers.Authorization) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
   const response = await fetch(url, {
-    headers: {
-      'Content-Type': 'application/json',
-      ...(init?.headers ?? {}),
-    },
     ...init,
+    headers,
   });
 
   if (!response.ok) {
@@ -175,6 +213,44 @@ export const api = {
         resolution_notes: resolutionNotes ?? null,
         actor: 'inventory-analyst-ui',
       }),
+    }),
+
+  // Auth
+  getMe: (): Promise<AuthPrincipal> => requestJson('/api/v1/auth/me'),
+  login: (username: string, password: string): Promise<AuthTokenResponse> =>
+    requestJson('/api/v1/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ username, password }),
+    }),
+  registerUser: (username: string, password: string, role: string): Promise<unknown> =>
+    requestJson('/api/v1/auth/register', {
+      method: 'POST',
+      body: JSON.stringify({ username, password, role }),
+    }),
+
+  // Operational Memory
+  listMemories: (category?: string): Promise<OperationalMemory[]> => {
+    const suffix = category ? `?category=${encodeURIComponent(category)}` : '';
+    return requestJson(`/api/v1/memory${suffix}`);
+  },
+  createMemory: (payload: Record<string, unknown>): Promise<OperationalMemory> =>
+    requestJson('/api/v1/memory', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  searchMemories: (query: string, category?: string): Promise<MemorySearchHit[]> => {
+    const q = new URLSearchParams({ q: query });
+    if (category) q.set('category', category);
+    return requestJson(`/api/v1/memory/search?${q.toString()}`);
+  },
+
+  // Workers
+  triggerSlaSweep: (): Promise<WorkerDispatchResponse> =>
+    requestJson('/api/v1/workers/sla-sweep', { method: 'POST' }),
+  triggerEdiBatch: (payloads: string[]): Promise<WorkerDispatchResponse> =>
+    requestJson('/api/v1/workers/edi214-batch', {
+      method: 'POST',
+      body: JSON.stringify({ payloads, actor: 'control-tower-ui' }),
     }),
 
   // Audit

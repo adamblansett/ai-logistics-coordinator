@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.auth import Principal, get_current_principal, require_roles, resolve_actor
 from app.core.config import Settings, get_runtime_settings
 from app.core.security import verify_webhook_signature
 from app.db.session import get_db
@@ -34,6 +35,7 @@ router = APIRouter(prefix="/tracking", tags=["tracking"])
 async def get_shipments(
     status_filter: str | None = Query(default=None, alias="status"),
     search: str | None = Query(default=None),
+    _: Principal = Depends(get_current_principal),
     session: AsyncSession = Depends(get_db),
 ) -> list[ShipmentRead]:
     shipments = await list_shipments(session, status_filter=status_filter, search=search)
@@ -43,15 +45,21 @@ async def get_shipments(
 @router.post("/shipments", response_model=ShipmentRead, status_code=status.HTTP_201_CREATED)
 async def create_shipment_endpoint(
     payload: ShipmentCreate,
+    principal: Principal = Depends(require_roles("DISPATCHER")),
     session: AsyncSession = Depends(get_db),
 ) -> ShipmentRead:
-    shipment = await create_shipment(session, payload)
+    shipment = await create_shipment(
+        session,
+        payload,
+        actor_override=resolve_actor(principal, payload.actor),
+    )
     return ShipmentRead.model_validate(shipment)
 
 
 @router.get("/shipments/{shipment_id}", response_model=ShipmentDetailRead)
 async def get_shipment_detail_endpoint(
     shipment_id: str,
+    _: Principal = Depends(get_current_principal),
     session: AsyncSession = Depends(get_db),
 ) -> ShipmentDetailRead:
     return await get_shipment_detail(session, shipment_id)
@@ -63,6 +71,7 @@ async def ingest_shipment_event_endpoint(
     payload: WebhookEventCreate,
     request: Request,
     x_webhook_signature: str | None = Header(default=None, alias="X-Webhook-Signature"),
+    principal: Principal = Depends(require_roles("WEBHOOK_INGESTOR", "DISPATCHER")),
     settings: Settings = Depends(get_runtime_settings),
     session: AsyncSession = Depends(get_db),
 ) -> EventIngestResponse:
@@ -92,7 +101,7 @@ async def ingest_shipment_event_endpoint(
         shipment,
         normalized,
         raw_payload=payload.model_dump(mode="json"),
-        actor=payload.actor,
+        actor=resolve_actor(principal, payload.actor),
     )
     return EventIngestResponse(
         event=TrackingEventRead.model_validate(event),
@@ -104,6 +113,7 @@ async def ingest_shipment_event_endpoint(
 @router.post("/edi214", response_model=EventIngestResponse)
 async def ingest_edi214_endpoint(
     payload: EDI214IngestRequest,
+    principal: Principal = Depends(require_roles("WEBHOOK_INGESTOR", "DISPATCHER")),
     session: AsyncSession = Depends(get_db),
 ) -> EventIngestResponse:
     try:
@@ -125,7 +135,7 @@ async def ingest_edi214_endpoint(
         shipment,
         normalized,
         raw_payload={"raw_edi_214": payload.raw_edi_214},
-        actor=payload.actor,
+        actor=resolve_actor(principal, payload.actor),
     )
     return EventIngestResponse(
         event=TrackingEventRead.model_validate(event),
@@ -138,6 +148,7 @@ async def ingest_edi214_endpoint(
 async def get_exceptions_endpoint(
     status_filter: str | None = Query(default=None, alias="status"),
     severity: str | None = Query(default=None),
+    _: Principal = Depends(get_current_principal),
     session: AsyncSession = Depends(get_db),
 ) -> list[TrackingExceptionRead]:
     exceptions = await list_exceptions(
@@ -152,13 +163,14 @@ async def get_exceptions_endpoint(
 async def update_exception_endpoint(
     exception_id: str,
     payload: TrackingExceptionUpdate,
+    principal: Principal = Depends(require_roles("DISPATCHER")),
     session: AsyncSession = Depends(get_db),
 ) -> TrackingExceptionRead:
     exc = await update_exception_status(
         session,
         exception_id,
         new_status=payload.status,
-        actor=payload.actor,
+        actor=resolve_actor(principal, payload.actor),
         resolution_notes=payload.resolution_notes,
     )
     return TrackingExceptionRead.model_validate(exc)

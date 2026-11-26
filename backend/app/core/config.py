@@ -26,6 +26,9 @@ class Settings(BaseSettings):
 
     database_url: str = "sqlite+aiosqlite:///./ai_logistics_coordinator.db"
     redis_url: str = "redis://redis:6379/0"
+    celery_broker_url: str = "redis://redis:6379/0"
+    celery_result_backend: str = "redis://redis:6379/1"
+    task_execution_mode: Literal["inline", "celery"] = "inline"
 
     llm_default_provider: Literal["mock", "ollama", "gemini"] = "mock"
     llm_fallback_providers: str = "ollama,gemini,mock"
@@ -35,9 +38,27 @@ class Settings(BaseSettings):
     gemini_default_model: str = "gemini-2.5-flash"
     llm_timeout_seconds: float = 15.0
     llm_redact_pii_for_cloud: bool = True
+    embedding_dimensions: int = 64
 
+    comm_delivery_mode: Literal["simulated", "smtp", "webhook"] = "simulated"
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from_email: str = "dispatch@ai-logistics-coordinator.local"
+    smtp_use_tls: bool = True
+    carrier_webhook_url: str = ""
+    carrier_webhook_timeout_seconds: float = 10.0
+    delivery_max_retries: int = 3
+
+    auth_enabled: bool = False
+    auth_token_ttl_minutes: int = 480
+    auth_api_keys: str = ""
     auth_secret_key: str = _DEFAULT_DEV_SECRET
     webhook_signing_secret: str = ""
+    rate_limit_enabled: bool = True
+    rate_limit_requests_per_minute: int = 120
+    otel_enabled: bool = False
     seed_demo_data: bool = False
 
     @property

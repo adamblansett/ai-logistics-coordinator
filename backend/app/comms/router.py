@@ -16,6 +16,8 @@ from app.comms.service import (
     send_communication,
     update_draft,
 )
+from app.core.auth import Principal, get_current_principal, require_roles, resolve_actor
+from app.core.config import Settings, get_runtime_settings
 from app.db.session import get_db
 from app.llm.router import LLMRouter, get_llm_router
 
@@ -26,6 +28,7 @@ router = APIRouter(prefix="/comms", tags=["comms"])
 async def get_communications_endpoint(
     status_filter: str | None = Query(default=None, alias="status"),
     shipment_id: str | None = Query(default=None),
+    _: Principal = Depends(get_current_principal),
     session: AsyncSession = Depends(get_db),
 ) -> list[CarrierCommunicationRead]:
     items = await list_communications(
@@ -43,16 +46,23 @@ async def get_communications_endpoint(
 )
 async def draft_communication_endpoint(
     payload: CommDraftRequest,
+    principal: Principal = Depends(require_roles("DISPATCHER")),
     session: AsyncSession = Depends(get_db),
     llm_router: LLMRouter = Depends(get_llm_router),
 ) -> CarrierCommunicationRead:
-    comm = await draft_communication(session, llm_router, payload)
+    comm = await draft_communication(
+        session,
+        llm_router,
+        payload,
+        actor_override=resolve_actor(principal, payload.actor),
+    )
     return CarrierCommunicationRead.from_orm_model(comm)
 
 
 @router.get("/{comm_id}", response_model=CarrierCommunicationRead)
 async def get_communication_endpoint(
     comm_id: str,
+    _: Principal = Depends(get_current_principal),
     session: AsyncSession = Depends(get_db),
 ) -> CarrierCommunicationRead:
     comm = await get_communication_or_404(session, comm_id)
@@ -63,6 +73,7 @@ async def get_communication_endpoint(
 async def update_communication_endpoint(
     comm_id: str,
     payload: CommUpdateRequest,
+    principal: Principal = Depends(require_roles("DISPATCHER")),
     session: AsyncSession = Depends(get_db),
 ) -> CarrierCommunicationRead:
     comm = await update_draft(
@@ -70,7 +81,7 @@ async def update_communication_endpoint(
         comm_id,
         subject=payload.subject,
         body=payload.body,
-        actor=payload.actor,
+        actor=resolve_actor(principal, payload.actor),
     )
     return CarrierCommunicationRead.from_orm_model(comm)
 
@@ -79,13 +90,14 @@ async def update_communication_endpoint(
 async def decide_communication_endpoint(
     comm_id: str,
     payload: CommDecisionRequest,
+    principal: Principal = Depends(require_roles("DISPATCHER")),
     session: AsyncSession = Depends(get_db),
 ) -> CarrierCommunicationRead:
     comm = await decide_communication(
         session,
         comm_id,
         decision=payload.decision,
-        actor=payload.actor,
+        actor=resolve_actor(principal, payload.actor),
         notes=payload.notes,
     )
     return CarrierCommunicationRead.from_orm_model(comm)
@@ -95,8 +107,15 @@ async def decide_communication_endpoint(
 async def send_communication_endpoint(
     comm_id: str,
     payload: CommSendRequest | None = Body(default=None),
+    principal: Principal = Depends(require_roles("DISPATCHER")),
+    settings: Settings = Depends(get_runtime_settings),
     session: AsyncSession = Depends(get_db),
 ) -> CarrierCommunicationRead:
-    actor = payload.actor if payload is not None else "dispatcher"
-    comm = await send_communication(session, comm_id, actor=actor)
+    fallback_actor = payload.actor if payload is not None else "dispatcher"
+    comm = await send_communication(
+        session,
+        comm_id,
+        actor=resolve_actor(principal, fallback_actor),
+        settings=settings,
+    )
     return CarrierCommunicationRead.from_orm_model(comm)

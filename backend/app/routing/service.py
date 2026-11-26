@@ -10,6 +10,7 @@ from app.core.audit import record_audit_event
 from app.db.base import ensure_utc, new_uuid, utcnow
 from app.llm.base import LLMRequest
 from app.llm.router import LLMRouter
+from app.memory.service import search_memories
 from app.routing.models import CarrierLane, DisruptionAlert, RouteRecommendation
 from app.routing.optimizer import evaluate_lanes
 from app.routing.schemas import (
@@ -42,7 +43,12 @@ async def list_lanes(
     return list(result.scalars().all())
 
 
-async def create_lane(session: AsyncSession, payload: CarrierLaneCreate) -> CarrierLane:
+async def create_lane(
+    session: AsyncSession,
+    payload: CarrierLaneCreate,
+    *,
+    actor_override: str | None = None,
+) -> CarrierLane:
     lane = CarrierLane(
         id=new_uuid(),
         carrier_scac=payload.carrier_scac.strip().upper(),
@@ -69,7 +75,7 @@ async def create_lane(session: AsyncSession, payload: CarrierLaneCreate) -> Carr
         entity_type="carrier_lane",
         entity_id=lane.id,
         action="CREATED",
-        actor=payload.actor,
+        actor=actor_override or payload.actor,
         previous_state=None,
         new_state="ACTIVE" if lane.active else "INACTIVE",
         details={
@@ -98,6 +104,8 @@ async def list_disruptions(
 async def create_disruption(
     session: AsyncSession,
     payload: DisruptionAlertCreate,
+    *,
+    actor_override: str | None = None,
 ) -> DisruptionAlert:
     alert = DisruptionAlert(
         id=new_uuid(),
@@ -118,7 +126,7 @@ async def create_disruption(
         entity_type="disruption_alert",
         entity_id=alert.id,
         action="CREATED",
-        actor=payload.actor,
+        actor=actor_override or payload.actor,
         previous_state=None,
         new_state="ACTIVE" if alert.active else "INACTIVE",
         details={
@@ -136,6 +144,8 @@ async def update_disruption(
     session: AsyncSession,
     disruption_id: str,
     payload: DisruptionAlertUpdate,
+    *,
+    actor_override: str | None = None,
 ) -> DisruptionAlert:
     result = await session.execute(
         select(DisruptionAlert).where(DisruptionAlert.id == disruption_id)
@@ -167,7 +177,7 @@ async def update_disruption(
         entity_type="disruption_alert",
         entity_id=alert.id,
         action="UPDATED",
-        actor=payload.actor,
+        actor=actor_override or payload.actor,
         previous_state=prev_state,
         new_state=new_state,
         details={"region": alert.region, "severity": alert.severity},
@@ -181,6 +191,8 @@ async def optimize_route(
     session: AsyncSession,
     llm_router: LLMRouter,
     req: RouteOptimizeRequest,
+    *,
+    actor_override: str | None = None,
 ) -> RouteRecommendation:
     """Evaluate active lanes for a shipment or corridor and persist a reviewable recommendation."""
     shipment: Shipment | None = None
@@ -260,6 +272,14 @@ async def optimize_route(
         f"{d.region}: {d.disruption_type} ({d.severity}, +{d.added_transit_hours}h)"
         for d in corridor_disruptions
     ]
+    memory_hits = await search_memories(
+        session,
+        f"{origin_region} {destination_region} {req.objective} {winner.carrier_scac}",
+        limit=2,
+    )
+    memory_titles = [
+        f"{hit.memory.title} ({hit.score:.2f})" for hit in memory_hits
+    ]
 
     llm_response = await llm_router.generate(
         LLMRequest(
@@ -285,6 +305,7 @@ async def optimize_route(
                 "estimated_carbon_kg": winner.estimated_carbon_kg,
                 "composite_score": winner.composite_score,
                 "active_disruptions": disruption_labels,
+                "historical_memories": memory_titles,
                 "runner_up": runner_up,
             },
         )
@@ -319,7 +340,7 @@ async def optimize_route(
         entity_type="route_recommendation",
         entity_id=rec.id,
         action="RECOMMENDATION_CREATED",
-        actor=req.actor,
+        actor=actor_override or req.actor,
         previous_state=None,
         new_state="PENDING_REVIEW",
         details={

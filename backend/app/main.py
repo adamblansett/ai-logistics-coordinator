@@ -9,7 +9,9 @@ from app.api.v1.router import api_v1_router
 from app.core.config import Settings, get_settings, validate_production_security
 from app.core.logging import configure_logging
 from app.core.middleware import SecurityHeadersMiddleware
+from app.core.rate_limit import RateLimitMiddleware
 from app.core.seed import seed_demo_workspace
+from app.core.telemetry import configure_telemetry
 from app.db.session import create_engine_and_sessionmaker, ensure_db_initialized
 from app.llm.router import LLMRouter
 
@@ -58,8 +60,10 @@ def create_app(settings_override: Settings | None = None) -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    application.add_middleware(RateLimitMiddleware, settings=cfg)
     application.add_middleware(SecurityHeadersMiddleware, settings=cfg)
     application.include_router(api_v1_router, prefix=cfg.api_v1_prefix)
+    configure_telemetry(application, cfg)
     return application
 
 

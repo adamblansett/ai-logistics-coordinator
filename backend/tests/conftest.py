@@ -17,6 +17,8 @@ async def test_app(tmp_path: Path) -> AsyncIterator[FastAPI]:
         database_url=f"sqlite+aiosqlite:///{db_path.as_posix()}",
         llm_default_provider="mock",
         llm_fallback_providers="mock",
+        auth_enabled=False,
+        rate_limit_enabled=False,
         seed_demo_data=False,
     )
     application = create_app(settings)

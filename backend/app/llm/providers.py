@@ -136,6 +136,7 @@ class MockLLMProvider:
         score = float(ctx.get("composite_score", 0.0))
         disruptions = ctx.get("active_disruptions") or []
         runner_up = ctx.get("runner_up")
+        memories = ctx.get("historical_memories") or []
 
         parts = [
             (
@@ -151,6 +152,9 @@ class MockLLMProvider:
             parts.append(f"Disruption adjustments applied for: {_format_list(disruptions)}.")
         else:
             parts.append("No active corridor disruptions penalized candidate lanes.")
+
+        if memories:
+            parts.append(f"Operational memory context: {_format_list(memories)}.")
 
         if isinstance(runner_up, dict):
             r_name = runner_up.get("carrier_name", "Runner-up")
